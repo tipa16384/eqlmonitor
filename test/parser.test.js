@@ -38,3 +38,16 @@ test('parses progression, fizzle, and blocked weapon proc events', () => {
   assert.equal(blocked.type, 'proc_blocked');
   assert.equal(blocked.reason, 'weapon_level_requirement');
 });
+
+test('parses invocation, heal, overheal, and Mend events', () => {
+  assert.equal(parseLine(prefix + 'You begin reciting the spellblade invocation.').name, 'spellblade');
+  const heal = parseLine(prefix + 'You healed Tipa for 14 (67) hit points by Light Healing.');
+  assert.equal(heal.type, 'heal');
+  assert.equal(heal.amount, 14);
+  assert.equal(heal.potential, 67);
+  assert.equal(heal.spell, 'Light Healing');
+  const petHeal = parseLine(prefix + 'a Teir`Dal ranger healed you for 66 hit points by Light Healing.');
+  assert.equal(petHeal.actor, 'a Teir`Dal ranger');
+  assert.equal(petHeal.target, 'you');
+  assert.equal(parseLine(prefix + 'You mend your wounds and heal some damage.').type, 'mend');
+});
