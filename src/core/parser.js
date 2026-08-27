@@ -28,11 +28,18 @@ function parseLine(line) {
   let m;
 
   if ((m = text.match(/^You have gained a level! Welcome to level (\d+)!$/))) return { type: 'level', ts, level: Number(m[1]), raw: line };
+  if ((m = text.match(/^You have gained an ability point!\s+You now have (\d+) ability points\.$/))) return { type: 'ability_point', ts, points: Number(m[1]), raw: line };
+  if ((m = text.match(/^You have gained the ability to use (.+)\.$/))) return { type: 'ability_unlock', ts, ability: m[1], raw: line };
+  if ((m = text.match(/^You have gained the ability "(.+)" at a cost of (\d+) ability points\.$/))) return { type: 'ability_unlock', ts, ability: m[1], cost: Number(m[2]), raw: line };
   if ((m = text.match(/^You gain experience! \(([\d.]+)%\)$/))) return { type: 'xp', ts, percent: Number(m[1]), raw: line };
   if ((m = text.match(/^You have entered (.+)\.$/))) return { type: 'zone', ts, zone: m[1], raw: line };
   if ((m = text.match(/^(.+) has been charmed\.$/i))) return { type: 'charm_start', ts, pet: m[1], raw: line };
   if ((m = text.match(/^Your Charm spell has worn off of (.+)\.$/i))) return { type: 'charm_end', ts, pet: m[1], raw: line };
   if ((m = text.match(/^You begin casting (.+)\.$/))) return { type: 'cast_start', ts, spell: m[1], raw: line };
+  if ((m = text.match(/^You have finished memorizing (.+)\.$/))) return { type: 'spell_memorized', ts, spell: m[1], raw: line };
+  if ((m = text.match(/^You forget (.+)\.$/))) return { type: 'spell_forgotten', ts, spell: m[1], raw: line };
+  if ((m = text.match(/^Your (.+) spell fizzles!$/))) return { type: 'spell_fizzle', ts, spell: m[1], raw: line };
+  if (text === 'Your will is not sufficient to command this weapon.') return { type: 'proc_blocked', ts, reason: 'weapon_level_requirement', raw: line };
   if ((m = text.match(/^You looted (?:a|an) (Mote of .+?) from (.+?)(?:'s|s') corpse/))) return { type: 'mote', ts, mote: m[1], source: m[2], raw: line };
   if ((m = text.match(/^You have slain (.+)!$/))) return { type: 'kill', ts, target: m[1], killer: 'You', raw: line };
   if ((m = text.match(/^(.+) has been slain by (.+)!$/))) return { type: 'death', ts, target: m[1], killer: m[2], raw: line };
