@@ -21,6 +21,15 @@ function modifierFromTail(tail = '') {
   return m ? m[1] : null;
 }
 
+function outcomeFromText(outcomeText) {
+  if (/miss/i.test(outcomeText)) return 'miss';
+  if (/parr/i.test(outcomeText)) return 'parry';
+  if (/dodg/i.test(outcomeText)) return 'dodge';
+  if (/block/i.test(outcomeText)) return 'block';
+  if (/magical skin absorbs/i.test(outcomeText)) return 'absorb';
+  return 'other';
+}
+
 function parseLine(line) {
   const base = parseTimestamp(line.trimEnd());
   if (!base) return null;
@@ -40,14 +49,26 @@ function parseLine(line) {
   if ((m = text.match(/^You forget (.+)\.$/))) return { type: 'spell_forgotten', ts, spell: m[1], raw: line };
   if ((m = text.match(/^Your (.+) spell fizzles!$/))) return { type: 'spell_fizzle', ts, spell: m[1], raw: line };
   if ((m = text.match(/^You begin reciting the (.+) invocation\.$/i))) return { type: 'invocation', ts, name: m[1].toLowerCase(), raw: line };
+  if ((m = text.match(/^You assume (?:a|an) (.+) stance\.$/i))) return { type: 'stance', ts, name: m[1].toLowerCase(), raw: line };
   if (text === 'You mend your wounds and heal some damage.') return { type: 'mend', ts, raw: line };
   if (text === 'Your will is not sufficient to command this weapon.') return { type: 'proc_blocked', ts, reason: 'weapon_level_requirement', raw: line };
+
+  if ((m = text.match(/^You healed (.+?) over time for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
+    return { type: 'heal', ts, actor: 'You', target: m[1], amount: Number(m[2]), potential: Number(m[3] || m[2]), spell: m[4], overTime: true, raw: line };
+  }
+  if ((m = text.match(/^(.+?) healed (.+?) over time for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
+    return { type: 'heal', ts, actor: m[1], target: m[2], amount: Number(m[3]), potential: Number(m[4] || m[3]), spell: m[5], overTime: true, raw: line };
+  }
   if ((m = text.match(/^You healed (.+?) for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
     return { type: 'heal', ts, actor: 'You', target: m[1], amount: Number(m[2]), potential: Number(m[3] || m[2]), spell: m[4], raw: line };
   }
   if ((m = text.match(/^(.+?) healed (.+?) for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
     return { type: 'heal', ts, actor: m[1], target: m[2], amount: Number(m[3]), potential: Number(m[4] || m[3]), spell: m[5], raw: line };
   }
+  if ((m = text.match(/^You healed (.+?) for (\d+)(?: \((\d+)\))? hit points\.$/i))) {
+    return { type: 'heal', ts, actor: 'You', target: m[1], amount: Number(m[2]), potential: Number(m[3] || m[2]), spell: null, raw: line };
+  }
+
   if ((m = text.match(/^You looted (?:a|an) (Mote of .+?) from (.+?)(?:'s|s') corpse/))) return { type: 'mote', ts, mote: m[1], source: m[2], raw: line };
   if ((m = text.match(/^You have slain (.+)!$/))) return { type: 'kill', ts, target: m[1], killer: 'You', raw: line };
   if ((m = text.match(/^(.+) has been slain by (.+)!$/))) return { type: 'death', ts, target: m[1], killer: m[2], raw: line };
@@ -65,6 +86,9 @@ function parseLine(line) {
   if ((m = text.match(/^(.+?) has taken (\d+) damage from (.+?) by (.+)\.$/i))) {
     return { type: 'damage', ts, actor: m[4], target: m[1], amount: Number(m[2]), damageType: 'unknown', action: 'dot', effect: m[3], raw: line };
   }
+  if ((m = text.match(/^(.+?) is (?:burned|pierced) by YOUR (.+?) for (\d+) points? of non-melee damage\.$/i))) {
+    return { type: 'damage', ts, actor: 'You', target: m[1], amount: Number(m[3]), damageType: 'non-melee', action: 'reactive', effect: null, reactiveEffect: m[2], raw: line };
+  }
   if ((m = text.match(/^(.+?) resisted your (.+)!$/i))) return { type: 'resist', ts, actor: 'You', target: m[1], effect: m[2], raw: line };
 
   if ((m = text.match(/^You (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?) for (\d+) points? of damage\.(.*)$/i))) {
@@ -74,14 +98,10 @@ function parseLine(line) {
     return { type: 'damage', ts, actor: m[1], target: m[3], amount: Number(m[4]), damageType: VERB_MAP[m[2].toLowerCase()], action: VERB_MAP[m[2].toLowerCase()], modifier: modifierFromTail(m[5]), raw: line };
   }
   if ((m = text.match(/^You try to (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?), but (.+)$/i))) {
-    const outcomeText = m[3];
-    let outcome = 'other';
-    if (/miss/i.test(outcomeText)) outcome = 'miss';
-    else if (/parr/i.test(outcomeText)) outcome = 'parry';
-    else if (/dodg/i.test(outcomeText)) outcome = 'dodge';
-    else if (/block/i.test(outcomeText)) outcome = 'block';
-    else if (/magical skin absorbs/i.test(outcomeText)) outcome = 'absorb';
-    return { type: 'attempt', ts, actor: 'You', target: m[2], action: VERB_MAP[m[1].toLowerCase()], outcome, raw: line };
+    return { type: 'attempt', ts, actor: 'You', target: m[2], action: VERB_MAP[m[1].toLowerCase()], outcome: outcomeFromText(m[3]), raw: line };
+  }
+  if ((m = text.match(/^(.+?) tries to (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?), but (.+)$/i))) {
+    return { type: 'attempt', ts, actor: m[1], target: m[3], action: VERB_MAP[m[2].toLowerCase()], outcome: outcomeFromText(m[4]), raw: line };
   }
   if (/\bYOU\b/.test(text) && /(points? of damage|points? of \w+ damage)/i.test(text)) return { type: 'incoming_damage', ts, raw: line };
   return { type: 'other', ts, raw: line };
