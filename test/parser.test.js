@@ -29,3 +29,12 @@ test('parses pet kill and absorb outcome', () => {
   const attempt = parseLine(prefix + "You try to kick Kahaptra Z`Taj, but Kahaptra Z`Taj's magical skin absorbs the blow!");
   assert.equal(attempt.outcome, 'absorb');
 });
+
+test('parses progression, fizzle, and blocked weapon proc events', () => {
+  assert.equal(parseLine(prefix + 'You have gained the ability to use Feign Death.').ability, 'Feign Death');
+  assert.equal(parseLine(prefix + 'You have finished memorizing Sanity Warp.').spell, 'Sanity Warp');
+  assert.equal(parseLine(prefix + 'Your Sanity Warp spell fizzles!').type, 'spell_fizzle');
+  const blocked = parseLine(prefix + 'Your will is not sufficient to command this weapon.');
+  assert.equal(blocked.type, 'proc_blocked');
+  assert.equal(blocked.reason, 'weapon_level_requirement');
+});
