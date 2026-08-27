@@ -19,9 +19,9 @@ class MonitorEngine {
   resetRuntime() {
     this.firstTs = null; this.lastTs = null; this.lastCombatTs = null;
     this.zone = null; this.level = null; this.levelChangedAt = null; this.levelEpochStart = null;
-    this.currentPet = null; this.autoAttack = false;
+    this.currentPet = null; this.autoAttack = false; this.invocation = null; this.spellbladeSpell = null;
     this.events = []; this.xp = []; this.kills = []; this.motes = [];
-    this.damage = []; this.attempts = []; this.resists = []; this.casts = []; this.spellFizzles = [];
+    this.damage = []; this.heals = []; this.attempts = []; this.resists = []; this.casts = []; this.spellFizzles = [];
     this.procBlocked = []; this.progressionChanges = [];
     this.activity = []; this.levelHistory = []; this.alerts = []; this.metricHistory = [];
     this.procBaselines = new Map(); this.procLastSeen = new Map(); this.triggeredEffects = new Map();
@@ -44,8 +44,6 @@ class MonitorEngine {
     switch (event.type) {
       case 'level':
         this.level = event.level; this.levelChangedAt = event.ts;
-        // EQ logs the ding before the XP/kill lines that caused it. Exclude that same-second reward
-        // from the new level's farming baseline while still showing the new level immediately.
         this.levelEpochStart = event.ts + 1;
         this.levelHistory.push({ ts: event.ts, level: event.level }); this.metricHistory = []; break;
       case 'ability_point':
@@ -53,6 +51,11 @@ class MonitorEngine {
       case 'spell_memorized':
       case 'spell_forgotten':
         this.progressionChanges.push(event); break;
+      case 'invocation':
+        this.invocation = event.name;
+        this.spellbladeSpell = null;
+        this.progressionChanges.push(event);
+        break;
       case 'zone': this.zone = event.zone; break;
       case 'charm_start': this.currentPet = { name: event.pet, startedAt: event.ts }; break;
       case 'charm_end':
@@ -61,6 +64,16 @@ class MonitorEngine {
       case 'auto_attack': this.autoAttack = event.enabled; break;
       case 'cast_start': this.casts.push(event); this.markActivity(event.ts, 1000, 2500); break;
       case 'spell_fizzle': this.spellFizzles.push(event); this.markActivity(event.ts, 500, 1500); break;
+      case 'mend':
+        this.heals.push({ ...event, actor: 'You', target: this.profile?.name || 'You', spell: 'Mend', amount: null, potential: null, owner: 'player', targetSelf: true, sourceType: 'mend' });
+        this.markActivity(event.ts, 500, 1000);
+        break;
+      case 'heal': {
+        const tagged = this.tagHeal(event);
+        this.heals.push(tagged);
+        if (tagged.targetSelf) this.markActivity(event.ts, 500, 1000);
+        break;
+      }
       case 'proc_blocked': {
         const procs = this.profile?.procs || [];
         const proc = procs.length === 1 ? procs[0] : null;
@@ -110,6 +123,29 @@ class MonitorEngine {
     return { ...event, owner: 'other', confidence: 'unknown' };
   }
 
+  tagHeal(event) {
+    const actorName = normalizeName(event.actor);
+    const targetName = normalizeName(event.target);
+    const playerName = normalizeName(this.profile?.name);
+    const owner = event.actor === 'You' ? 'player'
+      : (this.currentPet && actorName === normalizeName(this.currentPet.name) ? 'pet' : 'other');
+    const targetSelf = targetName === 'you' || (playerName && targetName === playerName);
+    let sourceType = owner === 'pet' && targetSelf ? 'pet_heal' : 'other_heal';
+
+    if (owner === 'player' && targetSelf) {
+      if (/^Lay on Hands\b/i.test(event.spell)) sourceType = 'cooldown_heal';
+      else {
+        const recentCast = [...this.casts].reverse().find((cast) => cast.spell === event.spell && event.ts - cast.ts >= 0 && event.ts - cast.ts <= 4000);
+        if (recentCast) sourceType = 'manual_cast';
+        else if (this.invocation === 'spellblade') {
+          if (!this.spellbladeSpell) this.spellbladeSpell = event.spell;
+          sourceType = event.spell === this.spellbladeSpell ? 'spellblade_proc' : 'automatic_heal';
+        } else sourceType = 'automatic_heal';
+      }
+    }
+    return { ...event, owner, targetSelf, sourceType };
+  }
+
   isPrimaryAttack(event) {
     const primaryType = this.profile?.equipment?.PRIMARY?.damageType;
     return Boolean(primaryType && event.action === primaryType);
@@ -142,7 +178,7 @@ class MonitorEngine {
 
   prune(now) {
     const cutoff = now - 60 * 60 * 1000;
-    for (const key of ['xp', 'kills', 'motes', 'damage', 'attempts', 'resists', 'casts', 'spellFizzles', 'procBlocked', 'activity']) {
+    for (const key of ['xp', 'kills', 'motes', 'damage', 'heals', 'attempts', 'resists', 'casts', 'spellFizzles', 'procBlocked', 'activity']) {
       this[key] = this[key].filter((event) => Array.isArray(event) ? event[1] >= cutoff : event.ts >= cutoff);
     }
     this.events = this.events.slice(-5000); this.alerts = this.alerts.slice(-50);
@@ -157,20 +193,31 @@ class MonitorEngine {
     const durationMinutes = Math.max((now - start) / 60_000, 1 / 60);
     const inWindow = (x) => x.ts >= start && x.ts <= now;
     const xp = this.xp.filter(inWindow), kills = this.kills.filter(inWindow), motes = this.motes.filter(inWindow);
-    const damage = this.damage.filter(inWindow), attempts = this.attempts.filter(inWindow), resists = this.resists.filter(inWindow);
+    const damage = this.damage.filter(inWindow), heals = this.heals.filter(inWindow), attempts = this.attempts.filter(inWindow), resists = this.resists.filter(inWindow);
     const activityIntervals = this.activity.map(([s, e]) => [Math.max(s, start), Math.min(e, now)]).filter(([s, e]) => e > s);
     const activePct = Math.min(100, unionDurationMs(activityIntervals) / Math.max(1, now - start) * 100);
     const xpSum = sum(xp.map((x) => x.percent));
     const playerDamage = damage.filter((x) => x.owner === 'player');
     const petDamage = damage.filter((x) => x.owner === 'pet' && x.confidence !== 'ambiguous');
     const playerTotal = sum(playerDamage.map((x) => x.amount)), petTotal = sum(petDamage.map((x) => x.amount));
+    const receivedHeals = heals.filter((x) => x.targetSelf && Number.isFinite(x.amount));
+    const healingReceived = sum(receivedHeals.map((x) => x.amount));
+    const selfHealing = sum(receivedHeals.filter((x) => x.owner === 'player').map((x) => x.amount));
+    const petHealing = sum(receivedHeals.filter((x) => x.owner === 'pet').map((x) => x.amount));
+    const spellbladeHealing = sum(receivedHeals.filter((x) => x.sourceType === 'spellblade_proc').map((x) => x.amount));
+    const manualHealing = sum(receivedHeals.filter((x) => x.sourceType === 'manual_cast').map((x) => x.amount));
+    const cooldownHealing = sum(receivedHeals.filter((x) => x.sourceType === 'cooldown_heal').map((x) => x.amount));
+    const overheal = sum(receivedHeals.map((x) => Math.max(0, (x.potential || x.amount) - x.amount)));
     return {
       start, now, durationMinutes, xpPercent: xpSum, xpPerMinute: xpSum / durationMinutes,
       kills: kills.length, killsPerMinute: kills.length / durationMinutes, xpPerKill: kills.length ? xpSum / kills.length : 0,
       motes: motes.length, motesPerHour: motes.length * 60 / durationMinutes, activePct,
       playerDamage: playerTotal, petDamage: petTotal,
       petShare: (playerTotal + petTotal) ? petTotal / (playerTotal + petTotal) * 100 : 0,
-      damage, attempts, resists
+      healingReceived, selfHealing, petHealing, spellbladeHealing, manualHealing, cooldownHealing,
+      spellbladeProcs: receivedHeals.filter((x) => x.sourceType === 'spellblade_proc').length,
+      mendUses: heals.filter((x) => x.sourceType === 'mend').length,
+      overheal, damage, heals, attempts, resists
     };
   }
 
@@ -210,6 +257,20 @@ class MonitorEngine {
       g.damage += d.amount; g.hits += 1; groups.set(key, g);
     }
     return [...groups.values()].sort((a, b) => b.damage - a.damage).slice(0, 20);
+  }
+
+  healingBreakdown(now = this.lastTs || Date.now()) {
+    const w = this.window(now), groups = new Map();
+    for (const h of w.heals) {
+      if (!h.targetSelf) continue;
+      const label = h.spell || h.sourceType || 'healing', key = `${h.sourceType}:${label}`;
+      const g = groups.get(key) || { sourceType: h.sourceType, label, uses: 0, healing: 0, potential: 0 };
+      g.uses += 1;
+      if (Number.isFinite(h.amount)) g.healing += h.amount;
+      if (Number.isFinite(h.potential)) g.potential += h.potential;
+      groups.set(key, g);
+    }
+    return [...groups.values()].sort((a, b) => b.healing - a.healing);
   }
 
   procAlerts(now = this.lastTs || Date.now()) {
@@ -252,8 +313,8 @@ class MonitorEngine {
     const w = this.window(now), status = this.evaluateStatus(now), zone = this.zoneOverride || this.zone || 'Unknown';
     return {
       character: this.profile ? { name: this.profile.name, race: this.profile.race, classes: this.profile.classes, primary: this.profile.equipment?.PRIMARY || null, secondary: this.profile.equipment?.SECONDARY || null, procs: this.profile.procs || [] } : null,
-      level: this.level, zone, pet: this.currentPet?.name || null, metrics: w, status,
-      procAlerts: this.procAlerts(now), damageBreakdown: this.damageBreakdown(now), mobMix: this.mobMix(now),
+      level: this.level, zone, pet: this.currentPet?.name || null, invocation: this.invocation, spellbladeSpell: this.spellbladeSpell, metrics: w, status,
+      procAlerts: this.procAlerts(now), damageBreakdown: this.damageBreakdown(now), healingBreakdown: this.healingBreakdown(now), mobMix: this.mobMix(now),
       recentLevels: this.levelHistory.slice(-8), recentChanges: this.progressionChanges.slice(-12),
       spellFizzles: this.spellFizzles.filter((x) => x.ts >= w.start && x.ts <= now)
     };
