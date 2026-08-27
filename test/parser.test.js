@@ -51,3 +51,29 @@ test('parses invocation, heal, overheal, and Mend events', () => {
   assert.equal(petHeal.target, 'you');
   assert.equal(parseLine(prefix + 'You mend your wounds and heal some damage.').type, 'mend');
 });
+
+test('parses stance, reactive damage, pet attempts, and heal-over-time', () => {
+  const stance = parseLine(prefix + 'You assume an offensive stance.');
+  assert.equal(stance.type, 'stance');
+  assert.equal(stance.name, 'offensive');
+
+  const reactive = parseLine(prefix + 'Master Yael is burned by YOUR flames for 11 points of non-melee damage.');
+  assert.equal(reactive.type, 'damage');
+  assert.equal(reactive.actor, 'You');
+  assert.equal(reactive.target, 'Master Yael');
+  assert.equal(reactive.amount, 11);
+  assert.equal(reactive.action, 'reactive');
+  assert.equal(reactive.reactiveEffect, 'flames');
+
+  const petAttempt = parseLine(prefix + "A flighty fiend tries to slash Master Yael, but Master Yael's magical skin absorbs the blow!");
+  assert.equal(petAttempt.type, 'attempt');
+  assert.equal(petAttempt.actor, 'A flighty fiend');
+  assert.equal(petAttempt.outcome, 'absorb');
+
+  const hot = parseLine(prefix + 'You healed Tipa over time for 191 (297) hit points by Sacred Echo.');
+  assert.equal(hot.type, 'heal');
+  assert.equal(hot.amount, 191);
+  assert.equal(hot.potential, 297);
+  assert.equal(hot.spell, 'Sacred Echo');
+  assert.equal(hot.overTime, true);
+});
