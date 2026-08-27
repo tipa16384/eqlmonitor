@@ -39,7 +39,15 @@ function parseLine(line) {
   if ((m = text.match(/^You have finished memorizing (.+)\.$/))) return { type: 'spell_memorized', ts, spell: m[1], raw: line };
   if ((m = text.match(/^You forget (.+)\.$/))) return { type: 'spell_forgotten', ts, spell: m[1], raw: line };
   if ((m = text.match(/^Your (.+) spell fizzles!$/))) return { type: 'spell_fizzle', ts, spell: m[1], raw: line };
+  if ((m = text.match(/^You begin reciting the (.+) invocation\.$/i))) return { type: 'invocation', ts, name: m[1].toLowerCase(), raw: line };
+  if (text === 'You mend your wounds and heal some damage.') return { type: 'mend', ts, raw: line };
   if (text === 'Your will is not sufficient to command this weapon.') return { type: 'proc_blocked', ts, reason: 'weapon_level_requirement', raw: line };
+  if ((m = text.match(/^You healed (.+?) for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
+    return { type: 'heal', ts, actor: 'You', target: m[1], amount: Number(m[2]), potential: Number(m[3] || m[2]), spell: m[4], raw: line };
+  }
+  if ((m = text.match(/^(.+?) healed (.+?) for (\d+)(?: \((\d+)\))? hit points by (.+)\.$/i))) {
+    return { type: 'heal', ts, actor: m[1], target: m[2], amount: Number(m[3]), potential: Number(m[4] || m[3]), spell: m[5], raw: line };
+  }
   if ((m = text.match(/^You looted (?:a|an) (Mote of .+?) from (.+?)(?:'s|s') corpse/))) return { type: 'mote', ts, mote: m[1], source: m[2], raw: line };
   if ((m = text.match(/^You have slain (.+)!$/))) return { type: 'kill', ts, target: m[1], killer: 'You', raw: line };
   if ((m = text.match(/^(.+) has been slain by (.+)!$/))) return { type: 'death', ts, target: m[1], killer: m[2], raw: line };
