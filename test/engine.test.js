@@ -31,3 +31,13 @@ test('flags a degrading XP rate', () => {
   e.activity = [[now - 120000, now]];
   assert.ok(['MOVE_DEEPER', 'SOFTENING'].includes(e.evaluateStatus(now).code));
 });
+
+test('recognizes Condemnation of Nife as a Paladin innate proc', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 1 });
+  e.ingest(line('21:00', 'You hit a ghoul for 42 points of magic damage by Condemnation of Nife.'));
+  const snap = e.snapshot();
+  const effect = snap.damageBreakdown.find((entry) => entry.label === 'Condemnation of Nife');
+  assert.ok(effect);
+  assert.equal(effect.category, 'innate_proc');
+  assert.equal(snap.procAlerts.some((alert) => /Condemnation of Nife/.test(alert.message)), false);
+});
