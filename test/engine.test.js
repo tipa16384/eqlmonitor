@@ -63,3 +63,24 @@ test('does not count the ding kill reward in the new level baseline', () => {
   assert.equal(snap.metrics.kills, 1);
   assert.equal(snap.metrics.xpPercent, 4);
 });
+
+test('separates SpellBlade proc healing from manual and pet healing', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 1 });
+  e.setProfile({ name: 'Tipa' });
+  e.ingest(line('21:00', 'a Teir`Dal ranger has been charmed.'));
+  e.ingest(line('21:01', 'You begin reciting the spellblade invocation.'));
+  e.ingest(line('21:02', 'You healed Tipa for 67 hit points by Light Healing.'));
+  e.ingest(line('21:03', 'a Teir`Dal ranger healed you for 66 hit points by Light Healing.'));
+  e.ingest(line('21:04', 'You begin casting Light Healing.'));
+  e.ingest(line('21:05', 'You healed Tipa for 40 (67) hit points by Light Healing.'));
+  e.ingest(line('21:06', 'You mend your wounds and heal some damage.'));
+  const snap = e.snapshot();
+  assert.equal(snap.invocation, 'spellblade');
+  assert.equal(snap.spellbladeSpell, 'Light Healing');
+  assert.equal(snap.metrics.spellbladeProcs, 1);
+  assert.equal(snap.metrics.spellbladeHealing, 67);
+  assert.equal(snap.metrics.petHealing, 66);
+  assert.equal(snap.metrics.manualHealing, 40);
+  assert.equal(snap.metrics.overheal, 27);
+  assert.equal(snap.metrics.mendUses, 1);
+});
