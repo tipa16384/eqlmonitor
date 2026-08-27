@@ -11,6 +11,8 @@ const ABILITIES = {
   'Chaotic Feedback': { category: 'direct_spell', damageType: 'magic' },
   'Sanity Warp': { category: 'direct_spell', damageType: 'magic' },
   'Choke': { category: 'dot_spell', damageType: 'magic' },
+  'Gasping Embrace': { category: 'dot_spell', damageType: 'magic' },
+  'Earthquake': { category: 'item_proc', source: 'item', itemName: 'Earthshaker', damageType: 'magic' },
   'Mesmerization III': { category: 'control_spell' },
   'Slay Undead': { category: 'modifier', targetAffinity: 'undead' }
 };
