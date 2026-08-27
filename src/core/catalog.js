@@ -7,10 +7,12 @@ const ITEMS = {
 
 const ABILITIES = {
   'Smiting Strike': { category: 'triggered', triggeredBy: 'smite', damageType: 'magic' },
-  'Condemnation of Nife': { category: 'innate_proc', source: 'class', sourceClass: 'Paladin' },
+  'Condemnation of Nife': { category: 'innate_proc', source: 'class', sourceClass: 'Paladin', targetAffinity: 'undead' },
   'Chaotic Feedback': { category: 'direct_spell', damageType: 'magic' },
+  'Sanity Warp': { category: 'direct_spell', damageType: 'magic' },
   'Choke': { category: 'dot_spell', damageType: 'magic' },
-  'Slay Undead': { category: 'modifier' }
+  'Mesmerization III': { category: 'control_spell' },
+  'Slay Undead': { category: 'modifier', targetAffinity: 'undead' }
 };
 
 module.exports = { ITEMS, ABILITIES };
