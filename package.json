@@ -1,0 +1,18 @@
+{
+  "name": "eqlmonitor",
+  "version": "0.1.0",
+  "description": "Live EverQuest Legends leveling and farming monitor",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "replay": "node scripts/replay.js"
+  },
+  "keywords": ["everquest", "eq-legends", "combat-log", "electron"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}
