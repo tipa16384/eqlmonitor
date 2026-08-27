@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EQL Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div><h1>EQL Monitor</h1><p>Live leveling & farming monitor</p></div>
+    <div class="actions"><button id="profileButton">Load Character Profile</button><button id="logButton">Open EQ Log</button></div>
+  </header>
+  <main>
+    <section class="identity panel">
+      <div><div class="eyebrow">Character</div><div id="character" class="big">No profile</div><div id="build" class="muted">—</div></div>
+      <div><div class="eyebrow">Level</div><div id="level" class="big">—</div></div>
+      <div><div class="eyebrow">Zone</div><div id="zone" class="big">Unknown</div></div>
+      <div><div class="eyebrow">Charm</div><div id="pet" class="big compact">None</div></div>
+    </section>
+    <section class="metrics">
+      <article class="metric panel"><div class="eyebrow">XP / minute</div><div id="xpMin" class="value">0.00%</div><div id="xpDetail" class="muted">0.0% in window</div></article>
+      <article class="metric panel"><div class="eyebrow">Kills / minute</div><div id="killsMin" class="value">0.00</div><div id="killDetail" class="muted">0 kills</div></article>
+      <article class="metric panel"><div class="eyebrow">Motes / hour</div><div id="motesHour" class="value">0.00</div><div id="moteDetail" class="muted">0 observed</div></article>
+      <article class="metric panel"><div class="eyebrow">Active farming</div><div id="activePct" class="value">0%</div><div id="petShare" class="muted">Pet: 0%</div></article>
+    </section>
+    <section id="statusPanel" class="status panel neutral"><div class="eyebrow">Farm status</div><div id="statusCode" class="status-code">IDLE</div><div id="statusMessage">Waiting for combat activity.</div></section>
+    <section class="two-col">
+      <article class="panel">
+        <h2>Live settings</h2>
+        <div class="form-grid">
+          <label>Window (minutes)<input id="windowMinutes" type="number" min="2" value="10"></label>
+          <label>Minimum kills<input id="minKills" type="number" min="1" value="4"></label>
+          <label>XP/min target (%)<input id="xpTarget" type="number" min="0" step="0.1" value="0"></label>
+          <label>Kills/min target<input id="killTarget" type="number" min="0" step="0.1" value="0"></label>
+          <label class="span-2">Zone override<input id="zoneOverride" type="text" placeholder="Useful if log starts after zoning"></label>
+        </div>
+        <button id="applySettings">Apply settings</button>
+        <p class="hint">Alerts are intentionally conservative. A level-up temporarily resets comparisons.</p>
+      </article>
+      <article class="panel">
+        <h2>Combat anomalies</h2><div id="anomalies" class="empty">No anomalies detected.</div><div id="weapons" class="weapons"></div>
+        <h2 class="subhead">Recent mob mix</h2><div id="mobMix" class="weapons"></div>
+      </article>
+    </section>
+    <section class="panel">
+      <div class="section-heading"><h2>Recent damage breakdown</h2><span class="muted">Rolling window; pet damage kept separate</span></div>
+      <table><thead><tr><th>Source</th><th>Action / effect</th><th>Type</th><th>Hits</th><th>Damage</th></tr></thead><tbody id="damageBody"><tr><td colspan="5" class="empty">No combat data.</td></tr></tbody></table>
+    </section>
+    <section class="panel paths"><h2>Inputs</h2><div><span>Profile</span><code id="profilePath">—</code></div><div><span>Log</span><code id="logPath">—</code></div></section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>
