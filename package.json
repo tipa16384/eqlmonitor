@@ -9,10 +9,18 @@
     "test": "node --test",
     "replay": "node scripts/replay.js"
   },
-  "keywords": ["everquest", "eq-legends", "combat-log", "electron"],
+  "keywords": [
+    "everquest",
+    "eq-legends",
+    "combat-log",
+    "electron"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "electron": "^37.0.0"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true
   }
 }
