@@ -18,10 +18,11 @@ class MonitorEngine {
 
   resetRuntime() {
     this.firstTs = null; this.lastTs = null; this.lastCombatTs = null;
-    this.zone = null; this.level = null; this.levelChangedAt = null;
+    this.zone = null; this.level = null; this.levelChangedAt = null; this.levelEpochStart = null;
     this.currentPet = null; this.autoAttack = false;
     this.events = []; this.xp = []; this.kills = []; this.motes = [];
-    this.damage = []; this.attempts = []; this.resists = []; this.casts = [];
+    this.damage = []; this.attempts = []; this.resists = []; this.casts = []; this.spellFizzles = [];
+    this.procBlocked = []; this.progressionChanges = [];
     this.activity = []; this.levelHistory = []; this.alerts = []; this.metricHistory = [];
     this.procBaselines = new Map(); this.procLastSeen = new Map(); this.triggeredEffects = new Map();
     this.primaryEligibleHits = 0;
@@ -43,7 +44,15 @@ class MonitorEngine {
     switch (event.type) {
       case 'level':
         this.level = event.level; this.levelChangedAt = event.ts;
+        // EQ logs the ding before the XP/kill lines that caused it. Exclude that same-second reward
+        // from the new level's farming baseline while still showing the new level immediately.
+        this.levelEpochStart = event.ts + 1;
         this.levelHistory.push({ ts: event.ts, level: event.level }); this.metricHistory = []; break;
+      case 'ability_point':
+      case 'ability_unlock':
+      case 'spell_memorized':
+      case 'spell_forgotten':
+        this.progressionChanges.push(event); break;
       case 'zone': this.zone = event.zone; break;
       case 'charm_start': this.currentPet = { name: event.pet, startedAt: event.ts }; break;
       case 'charm_end':
@@ -51,6 +60,14 @@ class MonitorEngine {
         break;
       case 'auto_attack': this.autoAttack = event.enabled; break;
       case 'cast_start': this.casts.push(event); this.markActivity(event.ts, 1000, 2500); break;
+      case 'spell_fizzle': this.spellFizzles.push(event); this.markActivity(event.ts, 500, 1500); break;
+      case 'proc_blocked': {
+        const procs = this.profile?.procs || [];
+        const proc = procs.length === 1 ? procs[0] : null;
+        this.procBlocked.push({ ...event, proc, confidence: proc ? 'inferred_unique_equipped_proc' : 'unknown' });
+        this.markActivity(event.ts, 500, 1000);
+        break;
+      }
       case 'xp': this.xp.push(event); break;
       case 'kill':
         this.kills.push({ ...event, credit: 'player', confidence: 'confirmed' });
@@ -125,16 +142,17 @@ class MonitorEngine {
 
   prune(now) {
     const cutoff = now - 60 * 60 * 1000;
-    for (const key of ['xp', 'kills', 'motes', 'damage', 'attempts', 'resists', 'casts', 'activity']) {
+    for (const key of ['xp', 'kills', 'motes', 'damage', 'attempts', 'resists', 'casts', 'spellFizzles', 'procBlocked', 'activity']) {
       this[key] = this[key].filter((event) => Array.isArray(event) ? event[1] >= cutoff : event.ts >= cutoff);
     }
     this.events = this.events.slice(-5000); this.alerts = this.alerts.slice(-50);
+    this.progressionChanges = this.progressionChanges.slice(-100);
     this.metricHistory = this.metricHistory.filter((x) => x.ts >= cutoff);
   }
 
   window(now = this.lastTs || Date.now()) {
     const requestedStart = now - this.windowMinutes * 60_000;
-    const epochStart = this.levelChangedAt || this.firstTs;
+    const epochStart = this.levelEpochStart || this.firstTs;
     const start = epochStart == null ? requestedStart : Math.max(requestedStart, epochStart);
     const durationMinutes = Math.max((now - start) / 60_000, 1 / 60);
     const inWindow = (x) => x.ts >= start && x.ts <= now;
@@ -196,11 +214,26 @@ class MonitorEngine {
 
   procAlerts(now = this.lastTs || Date.now()) {
     const alerts = [];
+    const blockedKeys = new Set();
+    const start = now - this.windowMinutes * 60_000;
+    const recentBlocked = this.procBlocked.filter((x) => x.ts >= start && x.ts <= now);
+    if (recentBlocked.length) {
+      const inferred = recentBlocked.filter((x) => x.proc);
+      if (inferred.length) {
+        const proc = inferred[inferred.length - 1].proc;
+        const key = `${proc.slot}:${proc.effectName}`; blockedKeys.add(key);
+        alerts.push({ code: 'PROC_BLOCKED', severity: 'warn', message: `${proc.itemName || proc.slot}: ${proc.effectName} attempted ${inferred.length} time${inferred.length === 1 ? '' : 's'} but the game reports your will is not sufficient to command the weapon.` });
+      } else {
+        alerts.push({ code: 'PROC_BLOCKED', severity: 'warn', message: `A weapon proc was blocked ${recentBlocked.length} time${recentBlocked.length === 1 ? '' : 's'} by a weapon level/will requirement.` });
+      }
+    }
     for (const [effect, state] of this.triggeredEffects.entries()) {
       if (state.count >= 3 && now - state.lastSeen <= this.windowMinutes * 60_000) alerts.push({ code: 'TRIGGERED_EFFECT', severity: 'info', message: `Unmapped automatic effect observed: ${effect} (${state.count} times).` });
     }
     for (const proc of this.profile?.procs || []) {
-      const key = `${proc.slot}:${proc.effectName}`, baseline = this.procBaselines.get(key);
+      const key = `${proc.slot}:${proc.effectName}`;
+      if (blockedKeys.has(key)) continue;
+      const baseline = this.procBaselines.get(key);
       if (!baseline || baseline.observed < 3 || this.primaryEligibleHits < 20) continue;
       const historicalRate = baseline.observed / Math.max(1, baseline.eligibleAtLast);
       const since = this.primaryEligibleHits - baseline.eligibleAtLast, expected = since * historicalRate;
@@ -220,7 +253,9 @@ class MonitorEngine {
     return {
       character: this.profile ? { name: this.profile.name, race: this.profile.race, classes: this.profile.classes, primary: this.profile.equipment?.PRIMARY || null, secondary: this.profile.equipment?.SECONDARY || null, procs: this.profile.procs || [] } : null,
       level: this.level, zone, pet: this.currentPet?.name || null, metrics: w, status,
-      procAlerts: this.procAlerts(now), damageBreakdown: this.damageBreakdown(now), mobMix: this.mobMix(now), recentLevels: this.levelHistory.slice(-8)
+      procAlerts: this.procAlerts(now), damageBreakdown: this.damageBreakdown(now), mobMix: this.mobMix(now),
+      recentLevels: this.levelHistory.slice(-8), recentChanges: this.progressionChanges.slice(-12),
+      spellFizzles: this.spellFizzles.filter((x) => x.ts >= w.start && x.ts <= now)
     };
   }
 }
