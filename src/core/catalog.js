@@ -7,6 +7,7 @@ const ITEMS = {
 
 const ABILITIES = {
   'Smiting Strike': { category: 'triggered', triggeredBy: 'smite', damageType: 'magic' },
+  'Condemnation of Nife': { category: 'innate_proc', source: 'class', sourceClass: 'Paladin' },
   'Chaotic Feedback': { category: 'direct_spell', damageType: 'magic' },
   'Choke': { category: 'dot_spell', damageType: 'magic' },
   'Slay Undead': { category: 'modifier' }
