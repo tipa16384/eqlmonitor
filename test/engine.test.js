@@ -41,3 +41,25 @@ test('recognizes Condemnation of Nife as a Paladin innate proc', () => {
   assert.equal(effect.category, 'innate_proc');
   assert.equal(snap.procAlerts.some((alert) => /Condemnation of Nife/.test(alert.message)), false);
 });
+
+test('attributes a blocked weapon proc when the profile has one equipped proc', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 1 });
+  e.setProfile({ procs: [{ slot: 'PRIMARY', effectName: 'Dismiss Undead', itemName: 'Ghoulbane' }] });
+  e.ingest(line('21:00', 'Your will is not sufficient to command this weapon.'));
+  const alert = e.snapshot().procAlerts.find((entry) => entry.code === 'PROC_BLOCKED');
+  assert.ok(alert);
+  assert.match(alert.message, /Ghoulbane/);
+  assert.match(alert.message, /Dismiss Undead/);
+});
+
+test('does not count the ding kill reward in the new level baseline', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 1 });
+  e.ingest(line('21:00', 'You have gained a level! Welcome to level 17!'));
+  e.ingest(line('21:00', 'You gain experience! (3.061%)'));
+  e.ingest(line('21:00', 'You have slain a willowisp!'));
+  e.ingest(line('21:02', 'You gain experience! (4.000%)'));
+  e.ingest(line('21:02', 'You have slain a ghoul!'));
+  const snap = e.snapshot();
+  assert.equal(snap.metrics.kills, 1);
+  assert.equal(snap.metrics.xpPercent, 4);
+});
