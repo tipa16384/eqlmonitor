@@ -2,7 +2,11 @@
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n, digits = 2) => Number.isFinite(n) ? n.toFixed(digits) : '0.00';
-const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>'\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
+const optionalNumber = (id) => {
+  const value = $(id).value.trim();
+  return value === '' ? 0 : Number(value);
+};
 
 function render(snapshot) {
   const c = snapshot.character;
@@ -43,7 +47,7 @@ $('profileButton').addEventListener('click', () => window.eqlMonitor.chooseProfi
 $('logButton').addEventListener('click', () => window.eqlMonitor.chooseLog());
 $('applySettings').addEventListener('click', () => window.eqlMonitor.setSettings({
   windowMinutes: Number($('windowMinutes').value), minKills: Number($('minKills').value),
-  xpTarget: Number($('xpTarget').value), killTarget: Number($('killTarget').value),
+  xpTarget: optionalNumber('xpTarget'), killTarget: optionalNumber('killTarget'),
   zoneOverride: $('zoneOverride').value.trim() || null
 }));
 window.eqlMonitor.onSnapshot(render);
