@@ -1,14 +1,14 @@
 'use strict';
 
 const { ABILITIES } = require('./catalog');
-const { median, percentile, sum, unionDurationMs } = require('./stats');
+const { median, sum, unionDurationMs } = require('./stats');
 
 function normalizeName(name) { return String(name || '').trim().toLowerCase(); }
 
 class MonitorEngine {
   constructor(options = {}) {
     this.windowMinutes = options.windowMinutes || 10;
-    this.minKills = options.minKills || 4;
+    this.minKills = options.minKills || 6;
     this.xpTarget = options.xpTarget || 0;
     this.killTarget = options.killTarget || 0;
     this.zoneOverride = null;
@@ -18,7 +18,7 @@ class MonitorEngine {
 
   resetRuntime() {
     this.firstTs = null; this.lastTs = null; this.lastCombatTs = null;
-    this.zone = null; this.level = null; this.levelChangedAt = null; this.levelEpochStart = null;
+    this.zone = null; this.zoneChangedAt = null; this.level = null; this.levelChangedAt = null; this.levelEpochStart = null;
     this.currentPet = null; this.autoAttack = false; this.invocation = null; this.spellbladeSpell = null;
     this.events = []; this.xp = []; this.kills = []; this.motes = [];
     this.damage = []; this.heals = []; this.attempts = []; this.resists = []; this.casts = []; this.spellFizzles = [];
@@ -56,7 +56,7 @@ class MonitorEngine {
         this.spellbladeSpell = null;
         this.progressionChanges.push(event);
         break;
-      case 'zone': this.zone = event.zone; break;
+      case 'zone': this.zone = event.zone; this.zoneChangedAt = event.ts; break;
       case 'charm_start': this.currentPet = { name: event.pet, startedAt: event.ts }; break;
       case 'charm_end':
         if (this.currentPet && normalizeName(this.currentPet.name) === normalizeName(event.pet)) this.currentPet = null;
@@ -183,7 +183,6 @@ class MonitorEngine {
     }
     this.events = this.events.slice(-5000); this.alerts = this.alerts.slice(-50);
     this.progressionChanges = this.progressionChanges.slice(-100);
-    this.metricHistory = this.metricHistory.filter((x) => x.ts >= cutoff);
   }
 
   window(now = this.lastTs || Date.now()) {
@@ -221,31 +220,93 @@ class MonitorEngine {
     };
   }
 
+  recentFarmSample(now = this.lastTs || Date.now()) {
+    const epochStart = this.levelEpochStart || this.firstTs;
+    const sampleStart = Math.max(epochStart || 0, this.zoneChangedAt || 0);
+    const eligibleKills = this.kills.filter((k) => k.ts <= now && k.ts >= sampleStart && k.confidence !== 'ambiguous');
+    if (eligibleKills.length < this.minKills) return null;
+
+    const sampleKills = eligibleKills.slice(-this.minKills);
+    const first = sampleKills[0];
+    const last = sampleKills[sampleKills.length - 1];
+    const elapsedMinutes = Math.max((last.ts - first.ts) / 60_000, 1 / 60);
+    const killsPerMinute = sampleKills.length > 1 ? (sampleKills.length - 1) / elapsedMinutes : 0;
+
+    let xpTotal = 0;
+    let previousBoundary = sampleStart || this.firstTs || first.ts;
+    const firstIndex = eligibleKills.length - sampleKills.length;
+    if (firstIndex > 0) previousBoundary = eligibleKills[firstIndex - 1].ts;
+
+    for (const kill of sampleKills) {
+      xpTotal += sum(this.xp.filter((x) => x.ts > previousBoundary && x.ts <= kill.ts).map((x) => x.percent));
+      previousBoundary = kill.ts;
+    }
+
+    const xpPerKill = xpTotal / sampleKills.length;
+    return {
+      ts: last.ts,
+      kills: sampleKills.length,
+      xpPercent: xpTotal,
+      xpPerKill,
+      killsPerMinute,
+      xpPerMinute: xpPerKill * killsPerMinute,
+      firstKillTs: first.ts,
+      lastKillTs: last.ts
+    };
+  }
+
+  farmReference(history) {
+    if (history.length < 4) return null;
+    const bestBand = [...history].sort((a, b) => b.xpPerMinute - a.xpPerMinute).slice(0, 4);
+    return {
+      xpPerMinute: median(bestBand.map((x) => x.xpPerMinute)),
+      killsPerMinute: median(bestBand.map((x) => x.killsPerMinute)),
+      xpPerKill: median(bestBand.map((x) => x.xpPerKill))
+    };
+  }
+
   captureMetrics(ts) {
-    const w = this.window(ts);
-    if (w.kills >= this.minKills) this.metricHistory.push({ ts, xpPerMinute: w.xpPerMinute, killsPerMinute: w.killsPerMinute, xpPerKill: w.xpPerKill });
+    const sample = this.recentFarmSample(ts);
+    if (sample) this.metricHistory.push(sample);
   }
 
   evaluateStatus(now = this.lastTs || Date.now()) {
     const w = this.window(now);
     if (!this.lastCombatTs || now - this.lastCombatTs > 60_000) return { code: 'IDLE', severity: 'neutral', message: 'Waiting for combat activity.' };
     if (this.levelChangedAt && now - this.levelChangedAt < 90_000) return { code: 'REBASELINING', severity: 'neutral', message: 'Level changed; rebuilding the current baseline.' };
-    if (w.kills < this.minKills) return { code: 'LEARNING', severity: 'neutral', message: `Learning current farm (${w.kills}/${this.minKills} kills).` };
-    const hist = this.metricHistory.slice(0, -1);
-    const xpRef = hist.length >= 4 ? percentile(hist.map((x) => x.xpPerMinute), 0.75) : 0;
-    const killRef = hist.length >= 4 ? percentile(hist.map((x) => x.killsPerMinute), 0.75) : 0;
-    const xpBelowTarget = this.xpTarget > 0 && w.xpPerMinute < this.xpTarget;
-    const killBelowTarget = this.killTarget > 0 && w.killsPerMinute < this.killTarget;
-    if ((xpRef && w.xpPerMinute < xpRef * 0.78) || xpBelowTarget) {
-      if ((killRef && w.killsPerMinute >= killRef * 0.85) && w.xpPerKill < median(hist.map((x) => x.xpPerKill)) * 0.85) {
-        return { code: 'MOVE_DEEPER', severity: 'warn', message: 'XP per kill is falling while kill speed remains healthy. Consider tougher mobs nearby.' };
-      }
-      if ((killRef && w.killsPerMinute < killRef * 0.72) || killBelowTarget) {
-        return { code: 'TOO_HARD', severity: 'warn', message: 'Kill throughput has dropped enough to hurt XP/min. Easier mobs may be more efficient.' };
-      }
-      return { code: 'SOFTENING', severity: 'warn', message: 'XP/min is below the recent reference rate.' };
+
+    const recent = this.recentFarmSample(now);
+    if (!recent) {
+      const sampleStart = Math.max(this.levelEpochStart || this.firstTs || 0, this.zoneChangedAt || 0);
+      const currentKills = this.kills.filter((k) => k.ts >= sampleStart && k.ts <= now && k.confidence !== 'ambiguous').length;
+      return { code: 'LEARNING', severity: 'neutral', message: `Learning current farm (${currentKills}/${this.minKills} kills).` };
     }
-    return { code: 'HEALTHY', severity: 'good', message: 'Current farm is performing near its recent reference rate.' };
+
+    const history = this.metricHistory.filter((x) => x.ts < recent.ts);
+    const ref = this.farmReference(history);
+    const xpBelowTarget = this.xpTarget > 0 && recent.xpPerMinute < this.xpTarget;
+    const killBelowTarget = this.killTarget > 0 && recent.killsPerMinute < this.killTarget;
+
+    if (!ref) {
+      if (killBelowTarget) return { code: 'TOO_HARD', severity: 'warn', message: 'Recent kill throughput is below your manual floor.' };
+      if (xpBelowTarget) return { code: 'SOFTENING', severity: 'warn', message: 'Recent XP/min is below your manual floor.' };
+      return { code: 'LEARNING', severity: 'neutral', message: 'Learning the productive range for this level.' };
+    }
+
+    const xpRatio = ref.xpPerMinute ? recent.xpPerMinute / ref.xpPerMinute : 1;
+    const killRatio = ref.killsPerMinute ? recent.killsPerMinute / ref.killsPerMinute : 1;
+    const rewardRatio = ref.xpPerKill ? recent.xpPerKill / ref.xpPerKill : 1;
+
+    if (killBelowTarget || (killRatio < 0.65 && xpRatio < 0.90)) {
+      return { code: 'TOO_HARD', severity: 'warn', message: `Recent ${recent.kills} kills are much slower than the best productive range for this level. Easier mobs may level faster.` };
+    }
+    if (rewardRatio < 0.70 && killRatio >= 0.95 && xpRatio < 0.90) {
+      return { code: 'MOVE_DEEPER', severity: 'warn', message: `Recent ${recent.kills} kills are fast but worth much less XP than the best productive range for this level. Consider tougher mobs.` };
+    }
+    if (xpBelowTarget || xpRatio < 0.80) {
+      return { code: 'SOFTENING', severity: 'warn', message: `Recent ${recent.kills} kills are producing less XP/min than the best productive range seen at this level.` };
+    }
+    return { code: 'HEALTHY', severity: 'good', message: `Recent ${recent.kills} kills are performing near the best productive range seen at this level.` };
   }
 
   damageBreakdown(now = this.lastTs || Date.now()) {
