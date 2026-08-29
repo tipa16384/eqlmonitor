@@ -30,13 +30,13 @@
         <h2>Live settings</h2>
         <div class="form-grid">
           <label>Window (minutes)<input id="windowMinutes" type="number" min="2" value="10"></label>
-          <label>Minimum kills<input id="minKills" type="number" min="1" value="4"></label>
+          <label>Minimum kills<input id="minKills" type="number" min="1" value="6"></label>
           <label>XP/min manual floor (%)<input id="xpTarget" type="number" min="0" step="0.1" placeholder="Auto"></label>
           <label>Kills/min manual floor<input id="killTarget" type="number" min="0" step="0.1" placeholder="Auto"></label>
           <label class="span-2">Zone override<input id="zoneOverride" type="text" placeholder="Useful if log starts after zoning"></label>
         </div>
         <button id="applySettings">Apply settings</button>
-        <p class="hint">XP/min and kills/min floors are optional. Leave them at <strong>Auto</strong> to use the learned relative baseline. Manual values add absolute minimums. Alerts are intentionally conservative, and a level-up temporarily resets comparisons.</p>
+        <p class="hint">XP/min and kills/min floors are optional. Leave them at <strong>Auto</strong> to compare your most recent kills with the best productive range observed at the current level. The recent sample restarts after zoning; the level reference resets when you level. Manual values add absolute minimums.</p>
       </article>
       <article class="panel">
         <h2>Combat anomalies</h2><div id="anomalies" class="empty">No anomalies detected.</div><div id="weapons" class="weapons"></div>
