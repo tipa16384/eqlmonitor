@@ -13,6 +13,9 @@ const ABILITIES = {
   'Choke': { category: 'dot_spell', damageType: 'magic' },
   'Gasping Embrace': { category: 'dot_spell', damageType: 'magic' },
   'Earthquake': { category: 'item_proc', source: 'item', itemName: 'Earthshaker', damageType: 'magic' },
+  'Boil Blood': { category: 'item_proc', source: 'item', itemName: 'BloodFire' },
+  'Puma Maw': { category: 'buff_proc', source: 'buff', buffName: 'Spirit of Puma' },
+  'Puma Maw II': { category: 'buff_proc', source: 'buff', buffName: 'Spirit of Puma' },
   'Mesmerization III': { category: 'control_spell' },
   'Slay Undead': { category: 'modifier', targetAffinity: 'undead' }
 };
