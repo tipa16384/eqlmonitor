@@ -84,3 +84,56 @@ test('separates SpellBlade proc healing from manual and pet healing', () => {
   assert.equal(snap.metrics.overheal, 27);
   assert.equal(snap.metrics.mendUses, 1);
 });
+
+function addFarmKill(engine, state, seconds, xpPercent, target = 'mob') {
+  state.ts += seconds * 1000;
+  engine.ingest({ type: 'xp', ts: state.ts - 1, percent: xpPercent });
+  engine.ingest({ type: 'kill', ts: state.ts, target });
+}
+
+test('Auto distinguishes productive, too-easy, and too-hard recent kills', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 4 });
+  const state = { ts: Date.parse('2026-08-29T12:00:00-04:00') };
+  e.ingest({ type: 'level', ts: state.ts, level: 21 });
+  state.ts += 91_000;
+
+  for (let i = 0; i < 12; i += 1) addFarmKill(e, state, 30, 3, 'productive mob');
+  assert.equal(e.evaluateStatus(state.ts).code, 'HEALTHY');
+
+  for (let i = 0; i < 4; i += 1) addFarmKill(e, state, 10, 0.3, 'too easy mob');
+  assert.equal(e.evaluateStatus(state.ts).code, 'MOVE_DEEPER');
+
+  for (let i = 0; i < 4; i += 1) addFarmKill(e, state, 120, 8, 'too hard mob');
+  assert.equal(e.evaluateStatus(state.ts).code, 'TOO_HARD');
+});
+
+test('Auto best-level reference does not drift downward during a poor camp', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 4 });
+  const state = { ts: Date.parse('2026-08-29T12:00:00-04:00') };
+  e.ingest({ type: 'level', ts: state.ts, level: 21 });
+  state.ts += 91_000;
+
+  for (let i = 0; i < 12; i += 1) addFarmKill(e, state, 30, 3, 'productive mob');
+  const before = e.farmReference(e.metricHistory.slice(0, -1));
+  for (let i = 0; i < 24; i += 1) addFarmKill(e, state, 10, 0.2, 'poor mob');
+  const after = e.farmReference(e.metricHistory.slice(0, -1));
+  assert.ok(after.xpPerMinute >= before.xpPerMinute);
+});
+
+test('Auto starts a fresh recent sample after zoning but keeps the level reference', () => {
+  const e = new MonitorEngine({ windowMinutes: 10, minKills: 4 });
+  const state = { ts: Date.parse('2026-08-29T12:00:00-04:00') };
+  e.ingest({ type: 'level', ts: state.ts, level: 21 });
+  state.ts += 91_000;
+  e.ingest({ type: 'zone', ts: state.ts, zone: 'Camp A' });
+
+  for (let i = 0; i < 12; i += 1) addFarmKill(e, state, 30, 3, 'productive mob');
+  assert.ok(e.farmReference(e.metricHistory.slice(0, -1)));
+
+  state.ts += 1_000;
+  e.ingest({ type: 'zone', ts: state.ts, zone: 'Camp B' });
+  for (let i = 0; i < 3; i += 1) addFarmKill(e, state, 20, 3, 'new camp mob');
+  assert.equal(e.evaluateStatus(state.ts).code, 'LEARNING');
+  addFarmKill(e, state, 20, 3, 'new camp mob');
+  assert.notEqual(e.evaluateStatus(state.ts).code, 'LEARNING');
+});
