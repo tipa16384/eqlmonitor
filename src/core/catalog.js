@@ -17,7 +17,9 @@ const ABILITIES = {
   'Puma Maw': { category: 'buff_proc', source: 'buff', buffName: 'Spirit of Puma' },
   'Puma Maw II': { category: 'buff_proc', source: 'buff', buffName: 'Spirit of Puma' },
   'Mesmerization III': { category: 'control_spell' },
-  'Slay Undead': { category: 'modifier', targetAffinity: 'undead' }
+  'Slay Undead': { category: 'modifier', targetAffinity: 'undead' },
+  'Finishing Blow': { category: 'combat_special' },
+  'Flurry': { category: 'combat_special' }
 };
 
 module.exports = { ITEMS, ABILITIES };
