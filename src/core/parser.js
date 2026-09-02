@@ -21,6 +21,13 @@ function modifierFromTail(tail = '') {
   return m ? m[1] : null;
 }
 
+function specialEffectFromModifier(modifier) {
+  if (!modifier) return null;
+  if (/\bFinishing Blow\b/i.test(modifier)) return 'Finishing Blow';
+  if (/\bFlurry\b/i.test(modifier)) return 'Flurry';
+  return null;
+}
+
 function outcomeFromText(outcomeText) {
   if (/miss/i.test(outcomeText)) return 'miss';
   if (/parr/i.test(outcomeText)) return 'parry';
@@ -92,16 +99,18 @@ function parseLine(line) {
   if ((m = text.match(/^(.+?) resisted your (.+)!$/i))) return { type: 'resist', ts, actor: 'You', target: m[1], effect: m[2], raw: line };
 
   if ((m = text.match(/^You (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?) for (\d+) points? of damage\.(.*)$/i))) {
-    return { type: 'damage', ts, actor: 'You', target: m[2], amount: Number(m[3]), damageType: VERB_MAP[m[1].toLowerCase()], action: VERB_MAP[m[1].toLowerCase()], modifier: modifierFromTail(m[4]), raw: line };
+    const modifier = modifierFromTail(m[4]);
+    return { type: 'damage', ts, actor: 'You', target: m[2], amount: Number(m[3]), damageType: VERB_MAP[m[1].toLowerCase()], action: VERB_MAP[m[1].toLowerCase()], modifier, effect: specialEffectFromModifier(modifier), raw: line };
   }
   if ((m = text.match(/^(.+?) (slashes|pierces|bashes|kicks|strikes|smites|crushes|punches|shoots|cleaves|reaves|bites) (.+?) for (\d+) points? of damage\.(.*)$/i))) {
-    return { type: 'damage', ts, actor: m[1], target: m[3], amount: Number(m[4]), damageType: VERB_MAP[m[2].toLowerCase()], action: VERB_MAP[m[2].toLowerCase()], modifier: modifierFromTail(m[5]), raw: line };
+    const modifier = modifierFromTail(m[5]);
+    return { type: 'damage', ts, actor: m[1], target: m[3], amount: Number(m[4]), damageType: VERB_MAP[m[2].toLowerCase()], action: VERB_MAP[m[2].toLowerCase()], modifier, effect: specialEffectFromModifier(modifier), raw: line };
   }
   if ((m = text.match(/^You try to (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?), but (.+)$/i))) {
-    return { type: 'attempt', ts, actor: 'You', target: m[2], action: VERB_MAP[m[1].toLowerCase()], outcome: outcomeFromText(m[3]), raw: line };
+    return { type: 'attempt', ts, actor: 'You', target: m[2], action: VERB_MAP[m[1].toLowerCase()], outcome: outcomeFromText(m[3]), modifier: modifierFromTail(m[3]), raw: line };
   }
   if ((m = text.match(/^(.+?) tries to (slash|pierce|bash|kick|strike|smite|crush|punch|shoot|cleave|reave|bite) (.+?), but (.+)$/i))) {
-    return { type: 'attempt', ts, actor: m[1], target: m[3], action: VERB_MAP[m[2].toLowerCase()], outcome: outcomeFromText(m[4]), raw: line };
+    return { type: 'attempt', ts, actor: m[1], target: m[3], action: VERB_MAP[m[2].toLowerCase()], outcome: outcomeFromText(m[4]), modifier: modifierFromTail(m[4]), raw: line };
   }
   if (/\bYOU\b/.test(text) && /(points? of damage|points? of \w+ damage)/i.test(text)) return { type: 'incoming_damage', ts, raw: line };
   return { type: 'other', ts, raw: line };
