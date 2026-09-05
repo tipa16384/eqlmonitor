@@ -25,6 +25,7 @@ class MonitorEngine {
     this.procBlocked = []; this.progressionChanges = [];
     this.activity = []; this.levelHistory = []; this.alerts = []; this.metricHistory = [];
     this.procBaselines = new Map(); this.procLastSeen = new Map(); this.triggeredEffects = new Map();
+    this.combatActionAliases = new Map();
     this.primaryEligibleHits = 0;
   }
 
@@ -51,6 +52,11 @@ class MonitorEngine {
       case 'spell_memorized':
       case 'spell_forgotten':
         this.progressionChanges.push(event); break;
+      case 'skill_up':
+        this.progressionChanges.push(event);
+        if (event.skill === 'Round Kick') this.combatActionAliases.set('kick', 'Round Kick');
+        if (event.skill === 'Tiger Claw') this.combatActionAliases.set('strike', 'Tiger Claw');
+        break;
       case 'invocation':
         this.invocation = event.name;
         this.spellbladeSpell = null;
@@ -100,7 +106,8 @@ class MonitorEngine {
         if (event.actor === 'You') { this.markActivity(event.ts, 1500, 2500); if (this.isPrimaryAttack(tagged)) this.primaryEligibleHits += 1; }
         break;
       }
-      case 'resist': this.resists.push(event); this.markActivity(event.ts, 1500, 2500); break;
+      case 'resist':
+        this.resists.push(event); this.consumeRecentCast(event.effect, event.ts); this.markActivity(event.ts, 1500, 2500); break;
       case 'damage': {
         const tagged = this.tagOwnership(event); tagged.castClass = this.classifyEffect(tagged); this.damage.push(tagged);
         if (tagged.owner === 'player' || tagged.owner === 'pet') this.markActivity(event.ts, 1500, 2500);
@@ -151,9 +158,25 @@ class MonitorEngine {
     return Boolean(primaryType && event.action === primaryType);
   }
 
+  consumeRecentCast(effect, ts) {
+    if (!effect) return null;
+    const cast = [...this.casts].reverse().find((candidate) => candidate.spell === effect && !candidate.damageResolved && ts - candidate.ts >= 0 && ts - candidate.ts <= 6000);
+    if (cast) cast.damageResolved = true;
+    return cast || null;
+  }
+
   classifyEffect(event) {
     if (!event.effect) return null;
-    const known = ABILITIES[event.effect]; if (known) return known.category;
+    const known = ABILITIES[event.effect];
+    if (known?.spellbladeCapable) {
+      if (this.consumeRecentCast(event.effect, event.ts)) return 'cast_spell';
+      if (this.invocation === 'spellblade') {
+        this.spellbladeSpell = event.effect;
+        return 'spellblade_proc';
+      }
+      return known.category;
+    }
+    if (known) return known.category;
     const recentCast = [...this.casts].reverse().find((cast) => cast.spell === event.effect && event.ts - cast.ts >= 0 && event.ts - cast.ts <= 6000);
     return recentCast ? 'cast_spell' : 'triggered_effect';
   }
@@ -189,9 +212,12 @@ class MonitorEngine {
     const requestedStart = now - this.windowMinutes * 60_000;
     const epochStart = this.levelEpochStart || this.firstTs;
     const start = epochStart == null ? requestedStart : Math.max(requestedStart, epochStart);
+    const moteStart = Math.max(requestedStart, this.firstTs || requestedStart);
     const durationMinutes = Math.max((now - start) / 60_000, 1 / 60);
+    const moteDurationMinutes = Math.max((now - moteStart) / 60_000, 1 / 60);
     const inWindow = (x) => x.ts >= start && x.ts <= now;
-    const xp = this.xp.filter(inWindow), kills = this.kills.filter(inWindow), motes = this.motes.filter(inWindow);
+    const inMoteWindow = (x) => x.ts >= moteStart && x.ts <= now;
+    const xp = this.xp.filter(inWindow), kills = this.kills.filter(inWindow), motes = this.motes.filter(inMoteWindow);
     const damage = this.damage.filter(inWindow), heals = this.heals.filter(inWindow), attempts = this.attempts.filter(inWindow), resists = this.resists.filter(inWindow);
     const activityIntervals = this.activity.map(([s, e]) => [Math.max(s, start), Math.min(e, now)]).filter(([s, e]) => e > s);
     const activePct = Math.min(100, unionDurationMs(activityIntervals) / Math.max(1, now - start) * 100);
@@ -210,7 +236,7 @@ class MonitorEngine {
     return {
       start, now, durationMinutes, xpPercent: xpSum, xpPerMinute: xpSum / durationMinutes,
       kills: kills.length, killsPerMinute: kills.length / durationMinutes, xpPerKill: kills.length ? xpSum / kills.length : 0,
-      motes: motes.length, motesPerHour: motes.length * 60 / durationMinutes, activePct,
+      motes: motes.length, motesPerHour: motes.length * 60 / moteDurationMinutes, activePct,
       playerDamage: playerTotal, petDamage: petTotal,
       petShare: (playerTotal + petTotal) ? petTotal / (playerTotal + petTotal) * 100 : 0,
       healingReceived, selfHealing, petHealing, spellbladeHealing, manualHealing, cooldownHealing,
@@ -313,7 +339,11 @@ class MonitorEngine {
     const w = this.window(now), groups = new Map();
     for (const d of w.damage) {
       if (d.owner !== 'player' && d.owner !== 'pet') continue;
-      const label = d.effect || d.action || d.damageType || 'unknown', key = `${d.owner}:${label}`;
+      const actionLabel = this.combatActionAliases.get(d.action) || d.action;
+      let label = d.effect || actionLabel || d.damageType || 'unknown';
+      if (d.effect && d.castClass === 'spellblade_proc') label = `${d.effect} (SpellBlade)`;
+      else if (d.effect && d.castClass === 'cast_spell' && ABILITIES[d.effect]?.spellbladeCapable) label = `${d.effect} (cast)`;
+      const key = `${d.owner}:${label}`;
       const g = groups.get(key) || { owner: d.owner, label, damage: 0, hits: 0, damageType: d.damageType, category: d.castClass || (d.owner === 'pet' ? 'pet' : 'physical') };
       g.damage += d.amount; g.hits += 1; groups.set(key, g);
     }
