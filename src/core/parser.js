@@ -47,7 +47,8 @@ function parseLine(line) {
   if ((m = text.match(/^You have gained an ability point!\s+You now have (\d+) ability points\.$/))) return { type: 'ability_point', ts, points: Number(m[1]), raw: line };
   if ((m = text.match(/^You have gained the ability to use (.+)\.$/))) return { type: 'ability_unlock', ts, ability: m[1], raw: line };
   if ((m = text.match(/^You have gained the ability "(.+)" at a cost of (\d+) ability points\.$/))) return { type: 'ability_unlock', ts, ability: m[1], cost: Number(m[2]), raw: line };
-  if ((m = text.match(/^You gain experience! \(([\d.]+)%\)$/))) return { type: 'xp', ts, percent: Number(m[1]), raw: line };
+  if ((m = text.match(/^You have become better at (.+)! \((\d+)\)$/))) return { type: 'skill_up', ts, skill: m[1], value: Number(m[2]), raw: line };
+  if ((m = text.match(/^You gain experience(?: \(with a bonus\))?! \(([\d.]+)%\)$/))) return { type: 'xp', ts, percent: Number(m[1]), raw: line };
   if ((m = text.match(/^You have entered (.+)\.$/))) return { type: 'zone', ts, zone: m[1], raw: line };
   if ((m = text.match(/^(.+) has been charmed\.$/i))) return { type: 'charm_start', ts, pet: m[1], raw: line };
   if ((m = text.match(/^Your Charm spell has worn off of (.+)\.$/i))) return { type: 'charm_end', ts, pet: m[1], raw: line };
